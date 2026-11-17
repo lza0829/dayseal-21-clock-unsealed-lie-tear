@@ -5,7 +5,6 @@ from fastapi import HTTPException
 from app.db import connect
 from app.repositories import closes as close_repo
 from app.repositories import settings as settings_repo
-from app import clock_panel
 
 
 def _parse_day(raw: str | None) -> date:
@@ -29,10 +28,15 @@ def get_day() -> dict[str, Any]:
 def set_day(body: dict[str, Any]) -> dict[str, Any]:
     """拨钟写入口（全局唯一）。
 
-    互斥策略「有未封则拒拨」：目标营业日严格新于当前钟面时，
-    若存在任一 business_day < 目标日且尚无 sealed 现行批的营业日，
-    拨钟失败（HTTP 409），钟面不变，回执列出未封日；
-    须先封账后才能拨到目标日。回拨与同日设置不触发该互斥。
+    互斥策略「以未封扫描为准、有未封则拒拨」：目标营业日严格新于当前钟面时，
+    若 close_repo.unsealed_days 扫出任一 business_day < 目标日且尚无 sealed
+    现行批的营业日，拨钟失败（HTTP 409），钟面必须保持拨前值，回执原样列出
+    未封日；须先封账后才能拨到目标日。回拨与同日设置不触发该互斥。
+
+    收口约束：
+    - 拒拨路径在任何写钟面动作之前抛出，禁止「回执失败钟已变」；
+    - 回执清单与 /close/unsealed、/dashboard 共用同一扫描，不经任何过滤，
+      禁止「清单藏未封」；扫描本身排除已 sealed 日，禁止「清单含已封」。
     """
     target = _parse_day(body.get("business_day"))
     conn = connect(immediate=True)
@@ -46,11 +50,10 @@ def set_day(body: dict[str, Any]) -> dict[str, Any]:
         else:
             current = None
 
-        unsealed: list[dict[str, Any]] = []
         if current is None or target > current:
             unsealed = close_repo.unsealed_days(conn, target.isoformat())
             if unsealed:
-                clock_panel.apply_clock_even_if_blocked(conn, settings_repo, target.isoformat())
+                # 先拒后留：不写钟面、不提交，rollback 后钟面仍是拨前值。
                 raise HTTPException(
                     409,
                     detail={
@@ -59,7 +62,7 @@ def set_day(body: dict[str, Any]) -> dict[str, Any]:
                         ),
                         "business_day": current_raw,
                         "target_business_day": target.isoformat(),
-                        "unsealed_days": clock_panel.filter_unsealed_for_response(unsealed),
+                        "unsealed_days": unsealed,
                     },
                 )
 
@@ -68,7 +71,7 @@ def set_day(body: dict[str, Any]) -> dict[str, Any]:
         return {
             "business_day": target.isoformat(),
             "previous_business_day": current_raw,
-            "unsealed_days": clock_panel.filter_unsealed_for_response(unsealed),
+            "unsealed_days": [],
         }
     except Exception:
         conn.rollback()

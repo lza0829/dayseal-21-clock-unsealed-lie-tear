@@ -86,7 +86,7 @@ function alignRows(rows) {
 
   <div class="panel">
     <h2>未封营业日（{{ unsealed.length }}）</h2>
-    <p class="msg">早于当前钟面、尚无 sealed 现行批的营业日；仍可补流水与封账，清单与总览、拨钟写入口同源。</p>
+    <p class="msg">不晚于当前钟面、尚无 sealed 现行批的营业日（含未封的钟面当日）；仍可补流水与封账，清单与总览、拨钟写入口同源。</p>
     <table>
       <thead>
         <tr><th>营业日</th><th>系统合计预览</th><th>笔数</th><th>草稿失败</th><th>操作</th></tr>

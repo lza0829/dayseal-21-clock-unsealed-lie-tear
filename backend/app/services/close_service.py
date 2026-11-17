@@ -43,7 +43,7 @@ def _parse_declared(body: dict[str, Any]) -> float:
 
 
 def list_unsealed(before_day: str | None = None) -> dict[str, Any]:
-    """未封日清单入口；与拨钟写入口、总览共用 close_repo.unsealed_days。"""
+    """未封日清单入口；与拨钟写入口、总览共用 close_repo.unsealed_days（边界 <=）。"""
     conn = connect()
     try:
         day = before_day or settings_repo.get(conn, "business_day") or ""

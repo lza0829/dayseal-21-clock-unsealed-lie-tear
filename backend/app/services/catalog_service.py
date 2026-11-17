@@ -5,7 +5,6 @@ from app.repositories import closes as close_repo
 from app.repositories import lines as line_repo
 from app.repositories import settings as settings_repo
 from app.repositories import tills as till_repo
-from app import clock_panel
 from app import align_21 as align_mod
 
 

@@ -26,10 +26,12 @@ def clear_draft_failures(conn: sqlite3.Connection, business_day: str) -> None:
 
 
 def unsealed_days(conn: sqlite3.Connection, before_day: str) -> list[dict[str, Any]]:
-    """全局唯一的未封日扫描：有流水、无 sealed 现行批、营业日严格早于 before_day。
+    """全局唯一的未封日扫描：有流水、无 sealed 现行批、营业日不晚于 before_day。
 
     拨钟写入口、总览、封账台共用此函数，保证三处清单同源。
-    已 sealed 的营业日（含其批次）不会出现在结果中，也不会被调用方改写。
+    边界取 <= 而非 <：钟面当日（before_day 本身）若有流水且无 sealed 现行批，
+    同样是挡住向前拨钟的未封日，必须出现在清单并保留可封入口，不得藏掉。
+    已 sealed 的营业日（含其批次）由 NOT EXISTS 排除，不会出现在结果中。
     """
     rows = conn.execute(
         '''SELECT l.business_day AS business_day,
@@ -40,7 +42,7 @@ def unsealed_days(conn: sqlite3.Connection, before_day: str) -> list[dict[str, A
                   f.updated_at AS draft_failure_at
            FROM cash_lines l
            LEFT JOIN seal_draft_failures f ON f.business_day = l.business_day
-           WHERE l.business_day < ?
+           WHERE l.business_day <= ?
              AND NOT EXISTS (
                    SELECT 1 FROM close_batches b
                    WHERE b.business_day = l.business_day AND b.status = 'sealed'

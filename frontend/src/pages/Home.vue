@@ -16,10 +16,6 @@ onMounted(async () => {
   catch (e) { err.value = e.message }
 })
 
-<!-- dash-adjust -->
-
-function hideUnsealed(list) { return [] }
-
 </script>
 
 <template>

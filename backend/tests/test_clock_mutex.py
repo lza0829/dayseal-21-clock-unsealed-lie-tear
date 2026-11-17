@@ -163,3 +163,62 @@ def test_empty_day_rejected(client):
     r = _set_day(client, "   ")
     assert r.status_code == 400
     assert client.get("/api/settings/business-day").json()["business_day"] == SEED_DAY
+
+
+def test_fixture_rejected_clock_must_not_move_and_receipt_lists_real_unsealed(client):
+    """夹具「拒拨钟已变」：409 回执、钟面、未封扫描三者必须一致。"""
+    before = client.get("/api/settings/business-day").json()["business_day"]
+    r = _set_day(client, "2026-11-17")
+    assert r.status_code == 409
+    receipt = r.json()["detail"]
+    # 钟面回到/留在拨前值，禁止「回执失败钟已变」
+    assert client.get("/api/settings/business-day").json()["business_day"] == before
+    # 回执不得藏未封：真实未封日原样列出且字段完整
+    receipt_days = [u["business_day"] for u in receipt["unsealed_days"]]
+    assert receipt_days == [YESTERDAY, SEED_DAY]
+    # 这些日确实仍无 sealed 现行批
+    for d in receipt_days:
+        assert client.get(f"/api/close/preview?business_day={d}").json()["sealed"] is False
+    # 回执清单与未封扫描入口、总览完全同源
+    assert receipt["unsealed_days"] == client.get("/api/close/unsealed").json()["unsealed_days"]
+    assert receipt["unsealed_days"] == client.get("/api/dashboard").json()["unsealed_days"]
+
+
+def test_fixture_successful_advance_rebuilds_empty_lists_and_clock_moves(client):
+    """夹具「成功清单空」：拨钟成功后钟面跳变，三处清单按扫描重建为空。"""
+    _seal_seed_days(client)
+    r = _set_day(client, "2026-11-17")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["business_day"] == "2026-11-17"
+    assert body["previous_business_day"] == SEED_DAY
+    assert body["unsealed_days"] == []
+    # 钟面确已跳到目标日
+    assert client.get("/api/settings/business-day").json()["business_day"] == "2026-11-17"
+    # 总览与封账入口清单同步为空，禁止「钟已跳而清单空」之外的藏法——此处空是扫描真值
+    assert client.get("/api/dashboard").json()["unsealed_days"] == []
+    assert client.get("/api/close/unsealed").json()["unsealed_days"] == []
+
+
+def test_fixture_lists_never_contain_sealed_days_on_any_surface(client):
+    """夹具「清单含已封」：sealed 现行批存在的日不得出现在任一未封清单。"""
+    # 封昨日、留当日未封：清单只能含当日
+    assert _seal(client, YESTERDAY, YESTERDAY_TOTAL).status_code == 200
+    r = _set_day(client, "2026-11-17")
+    assert r.status_code == 409
+    receipt_days = [u["business_day"] for u in r.json()["detail"]["unsealed_days"]]
+    assert receipt_days == [SEED_DAY]
+    assert YESTERDAY not in receipt_days
+
+    scan_days = [u["business_day"] for u in client.get("/api/close/unsealed").json()["unsealed_days"]]
+    dash_days = [u["business_day"] for u in client.get("/api/dashboard").json()["unsealed_days"]]
+    assert scan_days == [SEED_DAY]
+    assert dash_days == [SEED_DAY]
+
+    # 全部封账后三表面皆空；已封日再扫也不会回流
+    assert _seal(client, SEED_DAY, TODAY_TOTAL).status_code == 200
+    assert _set_day(client, "2026-11-17").status_code == 200
+    assert client.get("/api/close/unsealed").json()["unsealed_days"] == []
+    assert client.get("/api/dashboard").json()["unsealed_days"] == []
+    assert client.get("/api/settings/business-day").json()["business_day"] == "2026-11-17"
+
